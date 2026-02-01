@@ -1,0 +1,30 @@
+# Slack SDK
+slack-bolt>=1.18.0
+slack-sdk>=3.21.0
+
+# Google Cloud
+google-cloud-firestore>=2.11.0
+google-cloud-tasks>=2.13.0
+google-auth>=2.22.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.95.0
+functions-framework>=3.4.0
+
+# Anthropic Claude
+anthropic>=0.34.0
+
+# Web framework
+flask>=2.3.0
+gunicorn>=21.2.0
+
+# Utilities
+pyyaml>=6.0
+python-dateutil>=2.8.2
+requests>=2.31.0
+Pillow>=10.0.0
+httpx>=0.24.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+python-dotenv>=1.0.0

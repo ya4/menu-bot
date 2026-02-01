@@ -1,0 +1,200 @@
+# Store configuration for Ann Arbor, MI area
+# Ordered by cost preference (1 = most cost-effective)
+
+stores:
+  meijer:
+    name: "Meijer"
+    location_url: "https://www.meijer.com/shopping/store-locator/64.html"
+    cost_rank: 1
+    priority_categories:
+      - "pantry"
+      - "canned_goods"
+      - "frozen"
+      - "dairy"
+      - "snacks"
+      - "household"
+    default_store: true  # Fallback for items not assigned elsewhere
+    notes: "Best for cost on standard grocery items"
+
+  trader_joes:
+    name: "Trader Joe's"
+    location_url: "https://locations.traderjoes.com/mi/ann-arbor/678"
+    cost_rank: 2
+    priority_categories:
+      - "produce"
+      - "fresh_herbs"
+      - "cheese"
+      - "frozen_specialties"
+      - "nuts"
+      - "snacks_specialty"
+    quality_focus:
+      - "produce"
+      - "cheese"
+    notes: "Best produce quality, unique frozen items"
+
+  costco:
+    name: "Costco"
+    location_url: "https://www.costco.com/w/-/mi/ann-arbor/1106"
+    cost_rank: 3
+    priority_categories:
+      - "bulk_meat"
+      - "bulk_pantry"
+      - "bulk_dairy"
+      - "bread"
+      - "eggs"
+      - "olive_oil"
+      - "paper_goods"
+    bulk_thresholds:
+      meat_lbs: 2.0
+      cheese_lbs: 1.0
+      pantry_items: 3  # Buy at Costco if need 3+ of same item
+    notes: "Bulk items - verify quantity justifies trip"
+
+  buschs:
+    name: "Busch's"
+    location_url: "https://www.buschs.com/stores/buschs-saline"
+    cost_rank: 4
+    priority_categories:
+      - "specialty"
+      - "organic"
+      - "local"
+      - "wine"
+      - "prepared_foods"
+      - "bakery_specialty"
+    notes: "Specialty items not found at other stores"
+
+# Ingredient category mappings
+ingredient_categories:
+  produce:
+    items:
+      - "vegetables"
+      - "fruits"
+      - "salad"
+      - "lettuce"
+      - "tomatoes"
+      - "onions"
+      - "garlic"
+      - "potatoes"
+      - "carrots"
+      - "broccoli"
+      - "peppers"
+      - "mushrooms"
+      - "zucchini"
+      - "squash"
+      - "apples"
+      - "bananas"
+      - "berries"
+      - "lemons"
+      - "limes"
+      - "avocado"
+    preferred_store: "trader_joes"
+
+  fresh_herbs:
+    items:
+      - "basil"
+      - "cilantro"
+      - "parsley"
+      - "rosemary"
+      - "thyme"
+      - "mint"
+      - "dill"
+      - "chives"
+    preferred_store: "trader_joes"
+
+  meat:
+    items:
+      - "chicken"
+      - "beef"
+      - "pork"
+      - "ground beef"
+      - "ground turkey"
+      - "bacon"
+      - "sausage"
+      - "steak"
+    preferred_store: "costco"  # When buying bulk
+    fallback_store: "meijer"   # For smaller quantities
+
+  seafood:
+    items:
+      - "salmon"
+      - "shrimp"
+      - "fish"
+      - "tuna"
+      - "cod"
+      - "tilapia"
+    preferred_store: "costco"
+    fallback_store: "meijer"
+
+  dairy:
+    items:
+      - "milk"
+      - "butter"
+      - "yogurt"
+      - "sour cream"
+      - "cream cheese"
+      - "heavy cream"
+    preferred_store: "costco"
+    fallback_store: "meijer"
+
+  cheese:
+    items:
+      - "cheddar"
+      - "mozzarella"
+      - "parmesan"
+      - "feta"
+      - "goat cheese"
+      - "brie"
+      - "gruyere"
+    preferred_store: "trader_joes"
+    specialty_store: "buschs"
+
+  pantry:
+    items:
+      - "pasta"
+      - "rice"
+      - "flour"
+      - "sugar"
+      - "olive oil"
+      - "vegetable oil"
+      - "vinegar"
+      - "soy sauce"
+      - "canned tomatoes"
+      - "beans"
+      - "broth"
+      - "stock"
+    preferred_store: "meijer"
+    bulk_store: "costco"
+
+  spices:
+    items:
+      - "salt"
+      - "pepper"
+      - "cumin"
+      - "paprika"
+      - "oregano"
+      - "cinnamon"
+      - "chili powder"
+      - "garlic powder"
+      - "onion powder"
+    preferred_store: "meijer"
+
+  bread:
+    items:
+      - "bread"
+      - "tortillas"
+      - "buns"
+      - "rolls"
+      - "pita"
+      - "naan"
+    preferred_store: "costco"
+    fallback_store: "meijer"
+
+  specialty:
+    items:
+      - "truffle"
+      - "saffron"
+      - "specialty_cheese"
+      - "imported"
+      - "organic"
+      - "local"
+    preferred_store: "buschs"

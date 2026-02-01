@@ -1,0 +1,168 @@
+# Michigan Seasonal Produce Calendar
+# Based on Ann Arbor area growing seasons and local availability
+
+region: "ann_arbor_mi"
+timezone: "America/Detroit"
+
+seasons:
+  spring:
+    months: [4, 5, 6]  # April, May, June
+    peak_produce:
+      - name: "asparagus"
+        months: [4, 5, 6]
+        notes: "Michigan asparagus season - excellent local quality"
+      - name: "rhubarb"
+        months: [4, 5, 6]
+        notes: "Great for desserts and sauces"
+      - name: "spinach"
+        months: [4, 5, 6]
+        notes: "Spring spinach is tender and sweet"
+      - name: "radishes"
+        months: [4, 5, 6]
+      - name: "peas"
+        months: [5, 6]
+        notes: "Snap peas and snow peas"
+      - name: "lettuce"
+        months: [4, 5, 6]
+        notes: "All leafy greens peak in cool spring weather"
+      - name: "green onions"
+        months: [4, 5, 6]
+      - name: "strawberries"
+        months: [5, 6]
+        notes: "Michigan strawberry season starts late May"
+
+  summer:
+    months: [7, 8, 9]  # July, August, September
+    peak_produce:
+      - name: "tomatoes"
+        months: [7, 8, 9]
+        notes: "Peak Michigan tomato season - farmers market quality"
+      - name: "sweet corn"
+        months: [7, 8, 9]
+        notes: "Michigan sweet corn is exceptional"
+      - name: "zucchini"
+        months: [7, 8, 9]
+      - name: "summer squash"
+        months: [7, 8, 9]
+      - name: "cucumbers"
+        months: [7, 8, 9]
+      - name: "peppers"
+        months: [7, 8, 9]
+        notes: "Bell peppers and hot peppers"
+      - name: "green beans"
+        months: [7, 8]
+      - name: "eggplant"
+        months: [7, 8, 9]
+      - name: "blueberries"
+        months: [7, 8]
+        notes: "Michigan blueberry capital - excellent local berries"
+      - name: "raspberries"
+        months: [7, 8]
+      - name: "blackberries"
+        months: [7, 8]
+      - name: "peaches"
+        months: [8, 9]
+        notes: "Michigan peaches from southwest region"
+      - name: "melons"
+        months: [8, 9]
+      - name: "basil"
+        months: [7, 8, 9]
+        notes: "Fresh basil abundant in summer"
+
+  fall:
+    months: [10, 11]  # October, November
+    peak_produce:
+      - name: "apples"
+        months: [9, 10, 11]
+        notes: "Michigan apple season - many local orchards"
+      - name: "pumpkin"
+        months: [10, 11]
+      - name: "winter squash"
+        months: [10, 11]
+        notes: "Butternut, acorn, spaghetti squash"
+      - name: "sweet potatoes"
+        months: [10, 11]
+      - name: "brussels sprouts"
+        months: [10, 11]
+        notes: "Sweeter after frost"
+      - name: "kale"
+        months: [10, 11]
+        notes: "Cold weather improves flavor"
+      - name: "cabbage"
+        months: [10, 11]
+      - name: "turnips"
+        months: [10, 11]
+      - name: "parsnips"
+        months: [10, 11]
+      - name: "beets"
+        months: [10, 11]
+      - name: "carrots"
+        months: [10, 11]
+        notes: "Fall carrots are sweeter"
+      - name: "pears"
+        months: [9, 10]
+
+  winter:
+    months: [12, 1, 2, 3]  # December, January, February, March
+    peak_produce:
+      - name: "storage apples"
+        months: [12, 1, 2, 3]
+        notes: "Michigan apples stored from fall harvest"
+      - name: "potatoes"
+        months: [12, 1, 2, 3]
+        notes: "Storage vegetables from fall"
+      - name: "onions"
+        months: [12, 1, 2, 3]
+      - name: "carrots"
+        months: [12, 1, 2, 3]
+        notes: "Storage carrots"
+      - name: "cabbage"
+        months: [12, 1, 2, 3]
+      - name: "winter squash"
+        months: [12, 1, 2]
+        notes: "Stored squash from fall"
+      - name: "greenhouse greens"
+        months: [12, 1, 2, 3]
+        notes: "Local greenhouse operations"
+    notes: "Focus on storage vegetables, greenhouse produce, and heartier dishes"
+
+# Meal planning hints based on season
+seasonal_meal_suggestions:
+  spring:
+    - "Light salads with asparagus"
+    - "Rhubarb desserts"
+    - "Fresh pea dishes"
+    - "Grilled dishes as weather warms"
+
+  summer:
+    - "Grilled corn on the cob"
+    - "Fresh tomato salads and sauces"
+    - "Zucchini bread and dishes"
+    - "Berry desserts"
+    - "Light, fresh meals"
+    - "Outdoor grilling"
+
+  fall:
+    - "Apple-based dishes and desserts"
+    - "Roasted root vegetables"
+    - "Squash soups and sides"
+    - "Hearty comfort foods"
+    - "Thanksgiving preparations"
+
+  winter:
+    - "Slow cooker meals"
+    - "Soups and stews"
+    - "Roasted vegetables"
+    - "Warm, comforting dishes"
+    - "Holiday meal planning"
+
+# Farmers markets in Ann Arbor area
+local_markets:
+  - name: "Ann Arbor Farmers Market"
+    location: "315 Detroit St"
+    schedule: "Saturdays 7am-3pm (May-December), Wednesdays 7am-3pm (May-October)"
+    notes: "Best local produce selection"
+
+  - name: "Westside Farmers Market"
+    location: "Westgate Shopping Center"
+    schedule: "Thursdays 3pm-7pm (June-October)"
