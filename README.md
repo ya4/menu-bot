@@ -111,21 +111,37 @@ Navigate to **OAuth & Permissions** and add these **Bot Token Scopes**:
 
 We need to create OAuth credentials now, but we'll update the redirect URI after deployment.
 
+#### Configure OAuth Consent Screen (required first)
+
 1. Go to [Google Cloud Console > APIs & Services > OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
-2. Configure the consent screen:
-   - User Type: **External** (or Internal if using Google Workspace)
+2. Select User Type: **External** (or Internal if using Google Workspace)
+3. Click **Create**
+4. Fill in the required fields:
    - App name: "Menu Bot"
    - User support email: your email
-   - Developer contact: your email
-   - Click Save and Continue through the remaining steps
+   - Developer contact email: your email
+5. Click **Save and Continue**
+6. On the "Scopes" page, click **Save and Continue** (no scopes needed here)
+7. On the "Test users" page, click **Save and Continue**
+8. Click **Back to Dashboard**
 
-3. Go to [Credentials](https://console.cloud.google.com/apis/credentials)
-4. Click "Create Credentials" > "OAuth client ID"
-5. Application type: **Web application**
-6. Name: "Menu Bot"
-7. For now, leave "Authorized redirect URIs" empty (we'll add it in Step 7)
-8. Click Create
-9. Copy the **Client ID** and **Client Secret** - save these for Step 5
+#### Create OAuth Client ID
+
+1. Go to [Credentials](https://console.cloud.google.com/apis/credentials)
+2. Click **Create Credentials** > **OAuth client ID**
+3. Application type: **Web application**
+4. Name: "Menu Bot"
+5. Leave "Authorized JavaScript origins" empty
+6. Under "Authorized redirect URIs", add a placeholder: `https://example.com/callback`
+   - (We'll update this to the real URL in Step 8)
+7. Click **Create**
+8. A dialog will appear showing your credentials:
+   - Copy the **Client ID** (looks like: `XXXXX.apps.googleusercontent.com`)
+   - Copy the **Client Secret** (looks like: `GOCSPX-XXXXX`)
+   - Save both for Step 5
+9. Click **OK** to close the dialog
+
+> **Tip**: You can view these credentials later by clicking on the client name in the Credentials list.
 
 ### 5. Configure Secrets in Google Cloud
 
@@ -218,10 +234,12 @@ For each command, set the Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/even
 
 Go back to [Google Cloud Console > APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials):
 
-1. Click on your "Menu Bot" OAuth 2.0 Client ID
-2. Under "Authorized redirect URIs", click **Add URI**
-3. Add: `https://YOUR_CLOUD_RUN_URL/oauth/callback`
-4. Click **Save**
+1. Click on your "Menu Bot" OAuth 2.0 Client ID to edit it
+2. Under "Authorized redirect URIs":
+   - Delete the placeholder `https://example.com/callback`
+   - Click **Add URI**
+   - Add: `https://YOUR_CLOUD_RUN_URL/oauth/callback` (use your actual URL from Step 6)
+3. Click **Save**
 
 Now redeploy Cloud Run with the correct OAuth redirect URI:
 
