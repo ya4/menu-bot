@@ -418,12 +418,16 @@ ngrok http 8080
 **Bot doesn't respond to messages:**
 - Check Event Subscriptions URL is correct and verified
 - Ensure bot is invited to the channel
-- Check Cloud Run logs: `gcloud run logs read menu-bot`
+- Check Cloud Run logs:
+  ```bash
+  gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=menu-bot" --limit 50 --format "value(textPayload)"
+  ```
+  Or view logs in the [Cloud Console](https://console.cloud.google.com/run) by clicking on the menu-bot service → Logs tab
 
 **Recipe extraction fails:**
 - Some sites block scraping - try a different recipe URL
 - Check Anthropic API key is valid
-- Check Cloud Run logs for errors
+- Check Cloud Run logs for errors (see command above)
 
 **Google Tasks sync fails:**
 - Re-run `/menu-link-tasks` to refresh OAuth
