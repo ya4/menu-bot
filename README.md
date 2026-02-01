@@ -160,6 +160,19 @@ echo -n "your-client-id.apps.googleusercontent.com" | gcloud secrets create goog
 echo -n "your-client-secret" | gcloud secrets create google-oauth-client-secret --data-file=-
 ```
 
+#### Grant Cloud Run Access to Secrets
+
+Cloud Run needs permission to read the secrets:
+
+```bash
+# Get your project number and grant Secret Manager access
+PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')
+
+gcloud projects add-iam-policy-binding $(gcloud config get-value project) \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
 ### 6. Deploy to Cloud Run
 
 Deploy the bot to get your Cloud Run URL:
