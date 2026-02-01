@@ -39,6 +39,9 @@ Cloud Scheduler -> Cloud Functions (Weekly tasks)
 
 ## Setup Guide
 
+> **Note**: These steps are ordered to handle dependencies correctly. Some steps require
+> going back to update earlier configurations once URLs are available.
+
 ### 1. Google Cloud Project Setup
 
 ```bash
@@ -53,13 +56,24 @@ gcloud services enable \
   firestore.googleapis.com \
   cloudscheduler.googleapis.com \
   cloudfunctions.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  tasks.googleapis.com
 
 # Create Firestore database
 gcloud firestore databases create --location=us-central1
 ```
 
-### 2. Slack App Setup
+### 2. Get API Keys (No Dependencies)
+
+#### Anthropic API Key
+
+1. Go to [console.anthropic.com](https://console.anthropic.com)
+2. Create an API key
+3. Save it somewhere secure - you'll need it in Step 5
+
+### 3. Slack App Setup - Part 1 (Create App & Get Credentials)
+
+We'll create the Slack app and get credentials first, then configure URLs after Cloud Run is deployed.
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click "Create New App"
 2. Choose "From scratch" and name it "Menu Bot"
@@ -67,7 +81,7 @@ gcloud firestore databases create --location=us-central1
 
 #### OAuth & Permissions
 
-Add these **Bot Token Scopes**:
+Navigate to **OAuth & Permissions** and add these **Bot Token Scopes**:
 - `app_mentions:read` - Respond to @mentions
 - `channels:history` - Read messages in channels
 - `channels:read` - View channel info
@@ -79,18 +93,102 @@ Add these **Bot Token Scopes**:
 - `users:read` - Get user info
 - `im:write` - Send DMs
 
+#### Install App to Workspace
+
+1. Still in **OAuth & Permissions**, click "Install to Workspace"
+2. Authorize the app
+3. Copy the **Bot User OAuth Token** (starts with `xoxb-`) - save this for Step 5
+
+#### Get Signing Secret
+
+1. Navigate to **Basic Information**
+2. Under "App Credentials", copy the **Signing Secret** - save this for Step 5
+
+> **Stop here for Slack setup** - we'll configure Event Subscriptions, Slash Commands,
+> and Interactivity after deploying Cloud Run (Step 6).
+
+### 4. Google OAuth Setup - Part 1 (Create Credentials)
+
+We need to create OAuth credentials now, but we'll update the redirect URI after deployment.
+
+1. Go to [Google Cloud Console > APIs & Services > OAuth consent screen](https://console.cloud.google.com/apis/credentials/consent)
+2. Configure the consent screen:
+   - User Type: **External** (or Internal if using Google Workspace)
+   - App name: "Menu Bot"
+   - User support email: your email
+   - Developer contact: your email
+   - Click Save and Continue through the remaining steps
+
+3. Go to [Credentials](https://console.cloud.google.com/apis/credentials)
+4. Click "Create Credentials" > "OAuth client ID"
+5. Application type: **Web application**
+6. Name: "Menu Bot"
+7. For now, leave "Authorized redirect URIs" empty (we'll add it in Step 7)
+8. Click Create
+9. Copy the **Client ID** and **Client Secret** - save these for Step 5
+
+### 5. Configure Secrets in Google Cloud
+
+Now store all the credentials you've collected:
+
+```bash
+# Store Slack credentials
+echo -n "xoxb-your-actual-token" | gcloud secrets create slack-bot-token --data-file=-
+echo -n "your-actual-signing-secret" | gcloud secrets create slack-signing-secret --data-file=-
+
+# Store Anthropic API key
+echo -n "sk-ant-your-actual-key" | gcloud secrets create anthropic-api-key --data-file=-
+
+# Store Google OAuth credentials
+echo -n "your-client-id.apps.googleusercontent.com" | gcloud secrets create google-oauth-client-id --data-file=-
+echo -n "your-client-secret" | gcloud secrets create google-oauth-client-secret --data-file=-
+```
+
+### 6. Deploy to Cloud Run
+
+Deploy the bot to get your Cloud Run URL:
+
+```bash
+# Set your project ID
+export PROJECT_ID=$(gcloud config get-value project)
+
+# Deploy (first time - redirect URI will be updated after we get the URL)
+gcloud run deploy menu-bot \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID"
+```
+
+After deployment completes, note your **Service URL** - it will look like:
+```
+https://menu-bot-XXXXXXXXXX-uc.a.run.app
+```
+
+Save this URL - you'll need it for the next steps!
+
+### 7. Complete Slack App Setup (Requires Cloud Run URL)
+
+Now go back to your Slack app configuration at [api.slack.com/apps](https://api.slack.com/apps) and select your Menu Bot app.
+
 #### Event Subscriptions
 
-1. Enable Events
-2. Set Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/events`
-3. Subscribe to bot events:
+1. Navigate to **Event Subscriptions**
+2. Toggle "Enable Events" to **On**
+3. Set Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/events`
+   - Replace `YOUR_CLOUD_RUN_URL` with your actual URL from Step 6
+   - Slack will verify the URL - wait for the green "Verified" checkmark
+4. Under "Subscribe to bot events", add:
    - `app_home_opened`
    - `app_mention`
    - `message.channels`
+5. Click **Save Changes**
 
 #### Slash Commands
 
-Create these commands (all pointing to `https://YOUR_CLOUD_RUN_URL/slack/events`):
+Navigate to **Slash Commands** and create each command below.
+For each command, set the Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/events`
 
 | Command | Description |
 |---------|-------------|
@@ -109,61 +207,33 @@ Create these commands (all pointing to `https://YOUR_CLOUD_RUN_URL/slack/events`
 | `/menu-add-kid` | Add a kid |
 | `/menu-add-favorites` | Add favorite meals |
 
-#### Interactivity
+#### Interactivity & Shortcuts
 
-1. Enable Interactivity
-2. Set Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/interactions`
+1. Navigate to **Interactivity & Shortcuts**
+2. Toggle "Interactivity" to **On**
+3. Set Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/events`
+4. Click **Save Changes**
 
-#### Install App
+### 8. Complete Google OAuth Setup (Requires Cloud Run URL)
 
-1. Click "Install to Workspace"
-2. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
-3. Copy the **Signing Secret** from Basic Information
+Go back to [Google Cloud Console > APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials):
 
-### 3. Google OAuth Setup (for Google Tasks)
+1. Click on your "Menu Bot" OAuth 2.0 Client ID
+2. Under "Authorized redirect URIs", click **Add URI**
+3. Add: `https://YOUR_CLOUD_RUN_URL/oauth/callback`
+4. Click **Save**
 
-1. Go to [Google Cloud Console > APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials)
-2. Click "Create Credentials" > "OAuth client ID"
-3. Application type: "Web application"
-4. Name: "Menu Bot"
-5. Authorized redirect URIs: `https://YOUR_CLOUD_RUN_URL/oauth/callback`
-6. Copy the Client ID and Client Secret
-
-### 4. Anthropic API Key
-
-1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Create an API key
-3. Copy it for later
-
-### 5. Configure Secrets
+Now redeploy Cloud Run with the correct OAuth redirect URI:
 
 ```bash
-# Store secrets in Google Secret Manager
-echo -n "xoxb-your-token" | gcloud secrets create slack-bot-token --data-file=-
-echo -n "your-signing-secret" | gcloud secrets create slack-signing-secret --data-file=-
-echo -n "sk-ant-your-key" | gcloud secrets create anthropic-api-key --data-file=-
-echo -n "your-oauth-client-id" | gcloud secrets create google-oauth-client-id --data-file=-
-echo -n "your-oauth-client-secret" | gcloud secrets create google-oauth-client-secret --data-file=-
-```
+export CLOUD_RUN_URL="https://menu-bot-XXXXXXXXXX-uc.a.run.app"  # Your actual URL
 
-### 6. Deploy to Cloud Run
-
-```bash
-# Build and deploy
-gcloud builds submit --config cloudbuild.yaml
-
-# Or deploy manually
-gcloud run deploy menu-bot \
-  --source . \
+gcloud run services update menu-bot \
   --region us-central1 \
-  --allow-unauthenticated \
-  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_SIGNING_SECRET=slack-signing-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest" \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_OAUTH_REDIRECT_URI=https://menu-bot-HASH-uc.a.run.app/oauth/callback"
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_OAUTH_REDIRECT_URI=$CLOUD_RUN_URL/oauth/callback"
 ```
 
-After deployment, update your Slack app's URLs with the Cloud Run URL.
-
-### 7. Deploy Cloud Functions
+### 9. Deploy Cloud Functions (Scheduled Tasks)
 
 ```bash
 # Weekly meal plan generator (runs Saturday 9 AM)
@@ -171,20 +241,24 @@ gcloud functions deploy weekly-planner \
   --gen2 \
   --runtime python311 \
   --region us-central1 \
-  --source ./src/functions \
+  --source . \
   --entry-point generate_weekly_plan \
   --trigger-http \
-  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest"
+  --allow-unauthenticated \
+  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID"
 
 # Daily feedback prompt (runs daily 7 PM)
 gcloud functions deploy feedback-prompt \
   --gen2 \
   --runtime python311 \
   --region us-central1 \
-  --source ./src/functions \
+  --source . \
   --entry-point prompt_meal_feedback \
   --trigger-http \
-  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest"
+  --allow-unauthenticated \
+  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID"
 
 # Create Cloud Scheduler jobs
 gcloud scheduler jobs create http weekly-meal-plan \
@@ -200,7 +274,7 @@ gcloud scheduler jobs create http daily-feedback \
   --time-zone "America/Detroit"
 ```
 
-### 8. Initial Setup in Slack
+### 10. Initial Setup in Slack
 
 1. Invite the bot to your meal planning channel: `/invite @Menu Bot`
 2. Run `/menu-setup` to configure your family
