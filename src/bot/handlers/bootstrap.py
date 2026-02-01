@@ -169,20 +169,52 @@ class BootstrapHandlers:
                 respond("Only existing parents can add new parents.")
                 return
 
-            # Extract user ID from mention
-            match = re.search(r"<@([A-Z0-9]+)\|?[^>]*>", text)
-            if not match:
-                respond("Please mention the user to add as parent: `/menu-add-parent @username`")
+            if not text:
+                respond("Please specify a user: `/menu-add-parent @username`")
                 return
 
-            new_parent_id = match.group(1)
+            new_parent_id = None
+            name = None
 
-            # Get user info
-            try:
-                user_info = client.users_info(user=new_parent_id)
-                name = user_info["user"]["real_name"] or user_info["user"]["name"]
-            except Exception:
-                name = "Unknown"
+            # Try to extract user ID from Slack mention format <@U12345|username>
+            match = re.search(r"<@([A-Z0-9]+)\|?[^>]*>", text)
+            if match:
+                new_parent_id = match.group(1)
+            else:
+                # Try to find user by username/display name
+                # Remove @ prefix if present
+                search_name = text.lstrip("@")
+                try:
+                    # Search for the user in the workspace
+                    users_response = client.users_list()
+                    for user in users_response.get("members", []):
+                        if user.get("deleted") or user.get("is_bot"):
+                            continue
+                        # Check various name fields
+                        if (user.get("name", "").lower() == search_name.lower() or
+                            user.get("profile", {}).get("display_name", "").lower() == search_name.lower() or
+                            user.get("profile", {}).get("real_name", "").lower() == search_name.lower()):
+                            new_parent_id = user["id"]
+                            name = user.get("real_name") or user.get("name")
+                            break
+                except Exception as e:
+                    respond(f"Error searching for user: {str(e)}")
+                    return
+
+            if not new_parent_id:
+                respond(
+                    f"Couldn't find user '{text}'. Try mentioning them directly "
+                    f"(type @ and select from the dropdown) or check the username."
+                )
+                return
+
+            # Get user info if we don't have it yet
+            if not name:
+                try:
+                    user_info = client.users_info(user=new_parent_id)
+                    name = user_info["user"]["real_name"] or user_info["user"]["name"]
+                except Exception:
+                    name = "Unknown"
 
             # Check if already a member
             existing = self.db.get_family_member(new_parent_id)

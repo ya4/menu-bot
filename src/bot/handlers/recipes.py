@@ -39,9 +39,13 @@ class RecipeHandlers:
             if event.get("subtype") in ["bot_message", "message_changed", "message_deleted"]:
                 return
 
-            # Check if this is in the planning channel
+            # Check if this is in the planning channel (if one is configured)
             prefs = self.db.get_preferences()
-            if prefs.planning_channel_id and event.get("channel") != prefs.planning_channel_id:
+            channel_id = event.get("channel", "")
+
+            # If planning channel is set, only respond in that channel
+            # If not set, respond in any channel where we receive messages
+            if prefs.planning_channel_id and channel_id != prefs.planning_channel_id:
                 return
 
             text = event.get("text", "")
@@ -49,7 +53,8 @@ class RecipeHandlers:
             user_id = event.get("user", "")
 
             # Check for URLs that might be recipes
-            if self._contains_recipe_url(text):
+            urls = self._extract_urls(text)
+            if urls and self._looks_like_recipe_url(urls[0]):
                 self._process_potential_recipe(client, say, text, files, user_id, event)
                 return
 
@@ -251,26 +256,34 @@ class RecipeHandlers:
 
     def _process_potential_recipe(self, client, say, text, files, user_id, event):
         """Process a message that might contain a recipe."""
+        channel = event["channel"]
+        ts = event["ts"]
+
         # Add a reaction to show we're processing
         try:
-            client.reactions_add(
-                channel=event["channel"],
-                timestamp=event["ts"],
-                name="hourglass_flowing_sand",
-            )
+            client.reactions_add(channel=channel, timestamp=ts, name="eyes")
         except Exception:
             pass
 
         # Extract recipe
-        recipe = self.extractor.extract_from_message(text, files, user_id)
+        try:
+            recipe = self.extractor.extract_from_message(text, files, user_id)
+        except Exception as e:
+            # Remove processing reaction and add error
+            try:
+                client.reactions_remove(channel=channel, timestamp=ts, name="eyes")
+                client.reactions_add(channel=channel, timestamp=ts, name="x")
+            except Exception:
+                pass
+            say(
+                f"Sorry, I had trouble processing that recipe. Error: {str(e)[:100]}",
+                thread_ts=ts,
+            )
+            return
 
         # Remove processing reaction
         try:
-            client.reactions_remove(
-                channel=event["channel"],
-                timestamp=event["ts"],
-                name="hourglass_flowing_sand",
-            )
+            client.reactions_remove(channel=channel, timestamp=ts, name="eyes")
         except Exception:
             pass
 
@@ -281,7 +294,7 @@ class RecipeHandlers:
                 say(
                     f"I found a recipe for *{recipe.name}*, but it looks like you already have "
                     f"a similar recipe saved. Would you like to save this as a new version?",
-                    thread_ts=event["ts"],
+                    thread_ts=ts,
                 )
                 return
 
@@ -292,22 +305,34 @@ class RecipeHandlers:
 
             # Add success reaction
             try:
-                client.reactions_add(
-                    channel=event["channel"],
-                    timestamp=event["ts"],
-                    name="white_check_mark",
-                )
+                client.reactions_add(channel=channel, timestamp=ts, name="white_check_mark")
             except Exception:
                 pass
 
             # Post preview
             say(
                 **format_recipe_preview(recipe, show_actions=True),
-                thread_ts=event["ts"],
+                thread_ts=ts,
+            )
+        else:
+            # Extraction failed - add feedback
+            try:
+                client.reactions_add(channel=channel, timestamp=ts, name="thinking_face")
+            except Exception:
+                pass
+            say(
+                "I couldn't extract a recipe from that link. You can try:\n"
+                "• Using `/menu-add-recipe <url>` to manually add it\n"
+                "• Pasting the recipe text directly\n"
+                "• The site might be blocking access",
+                thread_ts=ts,
             )
 
-    def _contains_recipe_url(self, text: str) -> bool:
-        """Check if text contains a URL that's likely a recipe."""
+    def _looks_like_recipe_url(self, url: str) -> bool:
+        """Check if a URL is likely a recipe."""
+        url_lower = url.lower()
+
+        # Known recipe domains
         recipe_domains = [
             "nytimes.com/recipes",
             "cooking.nytimes.com",
@@ -322,10 +347,28 @@ class RecipeHandlers:
             "delish.com",
             "tasty.co",
             "simplyrecipes.com",
+            "thekitchn.com",
+            "minimalistbaker.com",
+            "halfbakedharvest.com",
+            "smittenkitchen.com",
+            "101cookbooks.com",
+            "loveandlemons.com",
+            "cookieandkate.com",
+            "pinchofyum.com",
+            "recipetineats.com",
+            "sallysbakingaddiction.com",
         ]
 
-        text_lower = text.lower()
-        return any(domain in text_lower for domain in recipe_domains)
+        # Check known domains
+        if any(domain in url_lower for domain in recipe_domains):
+            return True
+
+        # Check for recipe-related paths in URLs
+        recipe_paths = ["/recipe", "/recipes", "/cooking", "/food/"]
+        if any(path in url_lower for path in recipe_paths):
+            return True
+
+        return False
 
     def _text_suggests_recipe(self, text: str) -> bool:
         """Check if text suggests the user is sharing a recipe."""
