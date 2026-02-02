@@ -154,8 +154,8 @@ class BootstrapHandlers:
                                     f"Got it! I've saved *{len(favorites)}* favorite meals:\n"
                                     + "\n".join([f"- {f}" for f in favorites[:10]])
                                     + (f"\n_...and {len(favorites) - 10} more_" if len(favorites) > 10 else "")
-                                    + "\n\n*Next:* Run `/menu-generate-recipes` to create recipes from these favorites, "
-                                    "or share recipe links directly in this channel!"
+                                    + "\n\n*Next:* Run `/menu-find-recipes` to search for recipes matching these favorites, "
+                                    "or share specific recipe links directly in this channel!"
                                 ),
                             },
                         },
@@ -288,16 +288,16 @@ class BootstrapHandlers:
                 self.db.save_family_member(member)
                 respond(f"Added {text} as a kid! Their meal preferences will be prioritized.")
 
-        @self.app.command("/menu-generate-recipes")
-        def handle_generate_recipes(ack, body, client, respond):
-            """Generate recipes from saved favorite meals using Claude AI."""
+        @self.app.command("/menu-find-recipes")
+        def handle_find_recipes(ack, body, client, respond):
+            """Find real recipes from cooking sites for saved favorite meals."""
             ack()
 
             user_id = body["user_id"]
 
-            # Only parents can generate recipes
+            # Only parents can find recipes
             if not self.db.is_parent(user_id):
-                respond("Only parents can generate recipes.")
+                respond("Only parents can find recipes.")
                 return
 
             # Get saved favorites
@@ -307,7 +307,7 @@ class BootstrapHandlers:
             if not favorites:
                 respond(
                     "No favorite meals found! Use `/menu-add-favorites` first to add some meals, "
-                    "then run this command to generate recipes for them."
+                    "then run this command to find recipes for them."
                 )
                 return
 
@@ -316,9 +316,9 @@ class BootstrapHandlers:
             existing_names = {r.name.lower() for r in existing_recipes}
 
             # Filter out favorites that already have recipes
-            to_generate = [f for f in favorites if f.lower() not in existing_names]
+            to_find = [f for f in favorites if f.lower() not in existing_names]
 
-            if not to_generate:
+            if not to_find:
                 respond(
                     f"You already have recipes for all {len(favorites)} favorites! "
                     f"Total recipes: {len(existing_recipes)}. Run `/menu-plan new` to create a meal plan."
@@ -329,33 +329,33 @@ class BootstrapHandlers:
             channel_id = prefs.planning_channel_id or body["channel_id"]
             client.chat_postMessage(
                 channel=channel_id,
-                text=f"Generating recipes for {len(to_generate)} favorite meals... This may take a minute."
+                text=f"Searching for recipes for {len(to_find)} favorite meals... This may take a minute."
             )
 
-            # Generate recipes
-            generated = []
+            # Find recipes from real cooking sites
+            found = []
             failed = []
 
-            for meal_name in to_generate:
+            for meal_name in to_find:
                 try:
-                    logger.info(f"Generating recipe for: {meal_name}")
-                    recipe = self.claude.generate_recipe_from_name(meal_name)
+                    logger.info(f"Finding recipe for: {meal_name}")
+                    recipe = self.claude.find_recipe_for_meal(meal_name)
 
                     if recipe:
-                        # Auto-approve generated recipes since they came from parent favorites
+                        # Auto-approve recipes found for parent favorites
                         recipe.approved = True
                         self.db.save_recipe(recipe)
-                        generated.append(recipe.name)
-                        logger.info(f"Successfully generated recipe: {recipe.name}")
+                        source_info = f" (from {recipe.source_url})" if recipe.source_url else ""
+                        found.append(f"{recipe.name}{source_info}")
+                        logger.info(f"Successfully found recipe: {recipe.name}")
                     else:
                         failed.append(meal_name)
-                        logger.warning(f"Failed to generate recipe for: {meal_name}")
+                        logger.warning(f"Could not find recipe for: {meal_name}")
                 except Exception as e:
                     failed.append(meal_name)
-                    logger.error(f"Error generating recipe for {meal_name}: {e}")
+                    logger.error(f"Error finding recipe for {meal_name}: {e}")
 
             # Report results
-            total_recipes = len(self.db.get_all_recipes())
             approved_count = len([r for r in self.db.get_all_recipes() if r.approved])
 
             result_blocks = [
@@ -363,13 +363,22 @@ class BootstrapHandlers:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*Recipe generation complete!*\n\n"
-                               f"✅ Generated: {len(generated)} recipes\n"
-                               + (f"❌ Failed: {len(failed)} ({', '.join(failed)})\n" if failed else "")
+                        "text": f"*Recipe search complete!*\n\n"
+                               f"✅ Found: {len(found)} recipes\n"
+                               + (f"❌ Not found: {len(failed)} ({', '.join(failed)})\n" if failed else "")
                                + f"\n*Total approved recipes: {approved_count}*"
                     }
                 }
             ]
+
+            if failed:
+                result_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"💡 *Tip:* For meals I couldn't find, try sharing a specific recipe URL in the channel."
+                    }
+                })
 
             if approved_count >= 7:
                 result_blocks.append({
@@ -391,7 +400,7 @@ class BootstrapHandlers:
 
             client.chat_postMessage(
                 channel=channel_id,
-                text=f"Generated {len(generated)} recipes!",
+                text=f"Found {len(found)} recipes!",
                 blocks=result_blocks
             )
 

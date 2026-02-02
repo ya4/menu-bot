@@ -343,50 +343,40 @@ Keep suggestions practical and family-friendly. Be concise."""
 
         return response.content[0].text.strip()
 
-    def generate_recipe_from_name(self, meal_name: str) -> Optional[Recipe]:
+    def suggest_recipe_urls(self, meal_name: str) -> list[str]:
         """
-        Generate a complete recipe from just a meal name.
-        Used to bootstrap recipes from family favorites.
+        Suggest real recipe URLs from well-known cooking sites for a meal name.
+        Returns a list of URLs to try extracting recipes from.
         """
-        prompt = f"""Create a complete, family-friendly recipe for: {meal_name}
+        prompt = f"""For the meal "{meal_name}", suggest 3 specific recipe URLs from well-known cooking websites.
 
-Return a JSON object with exactly this structure (no markdown, just JSON):
-{{
-    "name": "{meal_name}",
-    "servings": 4,
-    "prep_time_min": 15,
-    "cook_time_min": 30,
-    "ingredients": [
-        {{"name": "ingredient name", "quantity": 1.0, "unit": "cup", "category": "produce"}},
-        ...
-    ],
-    "instructions": [
-        "Step 1...",
-        "Step 2...",
-        ...
-    ],
-    "tags": ["tag1", "tag2"],
-    "seasonal_ingredients": ["tomatoes", "corn"]
-}}
+Choose from reliable sources like:
+- allrecipes.com
+- foodnetwork.com
+- bonappetit.com
+- seriouseats.com
+- budgetbytes.com
+- simplyrecipes.com
+- cooking.nytimes.com
+- delish.com
+- tasty.co
+- thepioneerwoman.com
 
-Guidelines:
-- Create a classic, approachable version of this dish that most families would enjoy
-- Keep it practical - use common ingredients available at regular grocery stores
-- Aim for a reasonable cooking time (under 1 hour total if possible)
-- Include ALL ingredients, even basics like salt, pepper, and oil
-- For ingredients, use standard units (cup, tbsp, tsp, lb, oz, each, clove, etc.)
-- Category should be one of: produce, fresh_herbs, meat, seafood, dairy, cheese, pantry, spices, bread, specialty
+Return ONLY a JSON array of 3 URLs (no markdown, just JSON):
+["https://...", "https://...", "https://..."]
 
-For tags, include relevant ones like:
-- "quick" (under 30 min total), "easy", "kid-friendly", "healthy"
-- Cuisine type: "italian", "mexican", "asian", "american", etc.
-- Cooking method: "grilled", "baked", "slow-cooker", "stovetop", etc.
+Choose recipes that are:
+- Family-friendly and approachable
+- From the most reliable/popular versions of this dish
+- Actually exist on these sites (use real URL patterns you know)
 
-For seasonal_ingredients, list any produce items that are seasonally dependent."""
+If you're not confident about exact URLs, use the site's search pattern, like:
+- https://www.allrecipes.com/search?q=chicken+parmesan
+- https://www.foodnetwork.com/search/chicken-parmesan-"""
 
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -396,14 +386,26 @@ For seasonal_ingredients, list any produce items that are seasonally dependent."
                 result_text = result_text.split("```")[1]
                 if result_text.startswith("json"):
                     result_text = result_text[4:]
-            result = json.loads(result_text)
+            urls = json.loads(result_text)
+            if isinstance(urls, list):
+                return urls[:3]
+            return []
+        except (json.JSONDecodeError, IndexError):
+            return []
 
-            if "error" in result:
-                return None
+    def find_recipe_for_meal(self, meal_name: str) -> Optional[Recipe]:
+        """
+        Find a real recipe for a meal name by searching known cooking sites.
+        Tries multiple URLs until one works.
+        """
+        urls = self.suggest_recipe_urls(meal_name)
 
-            return self._json_to_recipe(result, source="generated", source_details=f"Generated from favorite: {meal_name}")
-        except (json.JSONDecodeError, IndexError, KeyError):
-            return None
+        for url in urls:
+            recipe = self.extract_recipe_from_url(url)
+            if recipe:
+                return recipe
+
+        return None
 
     def _json_to_recipe(self, data: dict, source: str, source_url: Optional[str] = None,
                         source_details: Optional[str] = None) -> Recipe:

@@ -66,7 +66,7 @@ def handle_help(ack, respond):
                         "`/menu-add-parent @user` - Add a parent\n"
                         "`/menu-add-kid @user or name` - Add a kid\n"
                         "`/menu-add-favorites` - Add favorite meals\n"
-                        "`/menu-generate-recipes` - Generate recipes from favorites\n"
+                        "`/menu-find-recipes` - Find recipes for favorites\n"
                         "`/menu-link-tasks` - Connect Google Tasks\n"
                     ),
                 },
@@ -182,7 +182,7 @@ def handle_debug(ack, body, respond):
 
     debug_text += """
 *Troubleshooting Tips*
-- If favorites exist but no recipes: Run `/menu-generate-recipes`
+- If favorites exist but no recipes: Run `/menu-find-recipes`
 - If 7+ approved recipes but plan fails: Check Cloud Run logs
 - If URLs don't work: Bot may need to be re-invited to channel
 """
