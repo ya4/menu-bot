@@ -344,9 +344,9 @@ class BootstrapHandlers:
                     recipes = self.scraper.search_and_extract(meal_name)
 
                     if recipes:
-                        # Take the first recipe found
+                        # Take the first recipe found - save as pending approval
                         recipe = recipes[0]
-                        recipe.approved = True
+                        recipe.approved = False  # Require parent approval
                         self.db.save_recipe(recipe)
                         source_info = f" (from {recipe.source_url})" if recipe.source_url else ""
                         found.append(f"{recipe.name}{source_info}")
@@ -359,7 +359,9 @@ class BootstrapHandlers:
                     logger.error(f"Error finding recipe for {meal_name}: {e}")
 
             # Report results
+            total_recipes = len(self.db.get_all_recipes())
             approved_count = len([r for r in self.db.get_all_recipes() if r.approved])
+            pending_count = total_recipes - approved_count
 
             result_blocks = [
                 {
@@ -369,17 +371,27 @@ class BootstrapHandlers:
                         "text": f"*Recipe search complete!*\n\n"
                                f"✅ Found: {len(found)} recipes\n"
                                + (f"❌ Not found: {len(failed)} ({', '.join(failed)})\n" if failed else "")
-                               + f"\n*Total approved recipes: {approved_count}*"
+                               + f"\n*Recipes pending approval: {pending_count}*\n"
+                               f"*Approved recipes: {approved_count}*"
                     }
                 }
             ]
+
+            if len(found) > 0:
+                result_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "📋 *Next step:* Run `/menu-recipes` to review and approve the recipes."
+                    }
+                })
 
             if failed:
                 result_blocks.append({
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"💡 *Tip:* For meals I couldn't find, try sharing a specific recipe URL in the channel."
+                        "text": "💡 *Tip:* For meals I couldn't find, try sharing a specific recipe URL in the channel."
                     }
                 })
 
@@ -388,7 +400,7 @@ class BootstrapHandlers:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "🎉 You have enough recipes! Run `/menu-plan new` to create your first meal plan."
+                        "text": "🎉 You have enough approved recipes! Run `/menu-plan new` to create your first meal plan."
                     }
                 })
             else:
@@ -397,7 +409,7 @@ class BootstrapHandlers:
                     "text": {
                         "type": "mrkdwn",
                         "text": f"You need at least 7 approved recipes for meal planning. "
-                               f"Add {7 - approved_count} more with `/menu-add-favorites` or share recipe links."
+                               f"Approve {7 - approved_count} more or add new ones with `/menu-add-favorites`."
                     }
                 })
 
