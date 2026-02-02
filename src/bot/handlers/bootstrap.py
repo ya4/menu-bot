@@ -10,6 +10,7 @@ from slack_sdk import WebClient
 
 from src.integrations.firestore_client import FirestoreClient, FamilyMember, Preferences
 from src.integrations.claude_client import ClaudeClient
+from src.integrations.recipe_scraper import RecipeScraper
 from src.bot.slack_utils import format_bootstrap_welcome
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class BootstrapHandlers:
         self.app = app
         self.db = db
         self.claude = claude or ClaudeClient()
+        self.scraper = RecipeScraper()
         self._register_handlers()
 
     def _register_handlers(self):
@@ -332,17 +334,18 @@ class BootstrapHandlers:
                 text=f"Searching for recipes for {len(to_find)} favorite meals... This may take a minute."
             )
 
-            # Find recipes from real cooking sites
+            # Find recipes from real cooking sites (no AI needed)
             found = []
             failed = []
 
             for meal_name in to_find:
                 try:
-                    logger.info(f"Finding recipe for: {meal_name}")
-                    recipe = self.claude.find_recipe_for_meal(meal_name)
+                    logger.info(f"Searching for recipe: {meal_name}")
+                    recipes = self.scraper.search_and_extract(meal_name)
 
-                    if recipe:
-                        # Auto-approve recipes found for parent favorites
+                    if recipes:
+                        # Take the first recipe found
+                        recipe = recipes[0]
                         recipe.approved = True
                         self.db.save_recipe(recipe)
                         source_info = f" (from {recipe.source_url})" if recipe.source_url else ""
