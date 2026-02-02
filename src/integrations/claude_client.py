@@ -345,66 +345,81 @@ Keep suggestions practical and family-friendly. Be concise."""
 
     def suggest_recipe_urls(self, meal_name: str) -> list[str]:
         """
-        Suggest real recipe URLs from well-known cooking sites for a meal name.
-        Returns a list of URLs to try extracting recipes from.
+        Search real recipe sites and extract actual recipe URLs.
+        Returns a list of recipe URLs found from search results.
         """
-        prompt = f"""For the meal "{meal_name}", suggest 3 specific recipe URLs from well-known cooking websites.
+        import re
+        from urllib.parse import quote_plus
 
-Choose from reliable sources like:
-- allrecipes.com
-- foodnetwork.com
-- bonappetit.com
-- seriouseats.com
-- budgetbytes.com
-- simplyrecipes.com
-- cooking.nytimes.com
-- delish.com
-- tasty.co
-- thepioneerwoman.com
+        # Build search URLs for reliable recipe sites
+        search_query = quote_plus(meal_name)
+        search_urls = [
+            f"https://www.allrecipes.com/search?q={search_query}",
+            f"https://www.seriouseats.com/search?q={search_query}",
+            f"https://www.budgetbytes.com/?s={search_query}",
+        ]
 
-Return ONLY a JSON array of 3 URLs (no markdown, just JSON):
-["https://...", "https://...", "https://..."]
+        recipe_urls = []
 
-Choose recipes that are:
-- Family-friendly and approachable
-- From the most reliable/popular versions of this dish
-- Actually exist on these sites (use real URL patterns you know)
+        for search_url in search_urls:
+            try:
+                response = httpx.get(search_url, follow_redirects=True, timeout=15.0)
+                response.raise_for_status()
+                html = response.text
 
-If you're not confident about exact URLs, use the site's search pattern, like:
-- https://www.allrecipes.com/search?q=chicken+parmesan
-- https://www.foodnetwork.com/search/chicken-parmesan-"""
+                # Extract recipe links based on site patterns
+                if "allrecipes.com" in search_url:
+                    # AllRecipes recipe URLs look like: /recipe/12345/recipe-name/
+                    matches = re.findall(r'href="(https://www\.allrecipes\.com/recipe/\d+/[^"]+)"', html)
+                    recipe_urls.extend(matches[:2])
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}]
-        )
+                elif "seriouseats.com" in search_url:
+                    # Serious Eats URLs: /recipes/recipe-name
+                    matches = re.findall(r'href="(https://www\.seriouseats\.com/[^"]*recipe[^"]*)"', html)
+                    recipe_urls.extend(matches[:2])
 
-        try:
-            result_text = response.content[0].text.strip()
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
-            urls = json.loads(result_text)
-            if isinstance(urls, list):
-                return urls[:3]
-            return []
-        except (json.JSONDecodeError, IndexError):
-            return []
+                elif "budgetbytes.com" in search_url:
+                    # Budget Bytes URLs in search results
+                    matches = re.findall(r'href="(https://www\.budgetbytes\.com/[^"]+)"', html)
+                    # Filter to likely recipe pages (not category/tag pages)
+                    recipe_matches = [u for u in matches if '/category/' not in u and '/tag/' not in u and u.count('/') >= 4]
+                    recipe_urls.extend(recipe_matches[:2])
+
+            except Exception as e:
+                continue
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_urls = []
+        for url in recipe_urls:
+            if url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return unique_urls[:5]  # Return up to 5 URLs to try
 
     def find_recipe_for_meal(self, meal_name: str) -> Optional[Recipe]:
         """
         Find a real recipe for a meal name by searching known cooking sites.
         Tries multiple URLs until one works.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"Searching for recipe: {meal_name}")
         urls = self.suggest_recipe_urls(meal_name)
+        logger.info(f"Found {len(urls)} potential URLs: {urls}")
 
         for url in urls:
+            logger.info(f"Trying URL: {url}")
             recipe = self.extract_recipe_from_url(url)
             if recipe:
+                logger.info(f"Successfully extracted recipe: {recipe.name}")
                 return recipe
+            else:
+                logger.info(f"Failed to extract recipe from: {url}")
 
+        logger.warning(f"No recipe found for: {meal_name}")
         return None
 
     def _json_to_recipe(self, data: dict, source: str, source_url: Optional[str] = None,
