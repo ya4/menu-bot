@@ -222,6 +222,7 @@ class Preferences:
     preferred_meal_ids: list[str] = field(default_factory=list)
     avoided_ingredients: list[str] = field(default_factory=list)
     health_goals: list[str] = field(default_factory=list)
+    favorite_meals: list[str] = field(default_factory=list)  # Text names from initial setup
     location: str = "ann_arbor_mi"
     meal_repeat_buffer_days: int = 14
     planning_channel_id: Optional[str] = None

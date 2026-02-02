@@ -4,20 +4,25 @@ Walks the family through setting up members and initial meal preferences.
 """
 
 import re
+import logging
 from slack_bolt import App
 from slack_sdk import WebClient
 
 from src.integrations.firestore_client import FirestoreClient, FamilyMember, Preferences
+from src.integrations.claude_client import ClaudeClient
 from src.bot.slack_utils import format_bootstrap_welcome
+
+logger = logging.getLogger(__name__)
 
 
 class BootstrapHandlers:
     """Handlers for the bootstrap/setup flow."""
 
-    def __init__(self, app: App, db: FirestoreClient):
+    def __init__(self, app: App, db: FirestoreClient, claude: ClaudeClient = None):
         """Initialize bootstrap handlers."""
         self.app = app
         self.db = db
+        self.claude = claude or ClaudeClient()
         self._register_handlers()
 
     def _register_handlers(self):
@@ -129,8 +134,11 @@ class BootstrapHandlers:
                 if line.strip()
             ]
 
-            # Get channel
+            # Save favorites to preferences
             prefs = self.db.get_preferences()
+            prefs.favorite_meals = favorites
+            self.db.save_preferences(prefs)
+
             channel_id = prefs.planning_channel_id
 
             if channel_id:
@@ -143,11 +151,11 @@ class BootstrapHandlers:
                             "text": {
                                 "type": "mrkdwn",
                                 "text": (
-                                    f"Got it! I've noted *{len(favorites)}* favorite meals:\n"
+                                    f"Got it! I've saved *{len(favorites)}* favorite meals:\n"
                                     + "\n".join([f"- {f}" for f in favorites[:10]])
                                     + (f"\n_...and {len(favorites) - 10} more_" if len(favorites) > 10 else "")
-                                    + "\n\nI'll look for recipes matching these meals. "
-                                    "You can also share recipe links directly in this channel!"
+                                    + "\n\n*Next:* Run `/menu-find-recipes` to search for recipes matching these favorites, "
+                                    "or share specific recipe links directly in this channel!"
                                 ),
                             },
                         },
@@ -279,6 +287,122 @@ class BootstrapHandlers:
                 )
                 self.db.save_family_member(member)
                 respond(f"Added {text} as a kid! Their meal preferences will be prioritized.")
+
+        @self.app.command("/menu-find-recipes")
+        def handle_find_recipes(ack, body, client, respond):
+            """Find real recipes from cooking sites for saved favorite meals."""
+            ack()
+
+            user_id = body["user_id"]
+
+            # Only parents can find recipes
+            if not self.db.is_parent(user_id):
+                respond("Only parents can find recipes.")
+                return
+
+            # Get saved favorites
+            prefs = self.db.get_preferences()
+            favorites = prefs.favorite_meals
+
+            if not favorites:
+                respond(
+                    "No favorite meals found! Use `/menu-add-favorites` first to add some meals, "
+                    "then run this command to find recipes for them."
+                )
+                return
+
+            # Check how many recipes we already have
+            existing_recipes = self.db.get_all_recipes()
+            existing_names = {r.name.lower() for r in existing_recipes}
+
+            # Filter out favorites that already have recipes
+            to_find = [f for f in favorites if f.lower() not in existing_names]
+
+            if not to_find:
+                respond(
+                    f"You already have recipes for all {len(favorites)} favorites! "
+                    f"Total recipes: {len(existing_recipes)}. Run `/menu-plan new` to create a meal plan."
+                )
+                return
+
+            # Notify user we're starting
+            channel_id = prefs.planning_channel_id or body["channel_id"]
+            client.chat_postMessage(
+                channel=channel_id,
+                text=f"Searching for recipes for {len(to_find)} favorite meals... This may take a minute."
+            )
+
+            # Find recipes from real cooking sites
+            found = []
+            failed = []
+
+            for meal_name in to_find:
+                try:
+                    logger.info(f"Finding recipe for: {meal_name}")
+                    recipe = self.claude.find_recipe_for_meal(meal_name)
+
+                    if recipe:
+                        # Auto-approve recipes found for parent favorites
+                        recipe.approved = True
+                        self.db.save_recipe(recipe)
+                        source_info = f" (from {recipe.source_url})" if recipe.source_url else ""
+                        found.append(f"{recipe.name}{source_info}")
+                        logger.info(f"Successfully found recipe: {recipe.name}")
+                    else:
+                        failed.append(meal_name)
+                        logger.warning(f"Could not find recipe for: {meal_name}")
+                except Exception as e:
+                    failed.append(meal_name)
+                    logger.error(f"Error finding recipe for {meal_name}: {e}")
+
+            # Report results
+            approved_count = len([r for r in self.db.get_all_recipes() if r.approved])
+
+            result_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Recipe search complete!*\n\n"
+                               f"✅ Found: {len(found)} recipes\n"
+                               + (f"❌ Not found: {len(failed)} ({', '.join(failed)})\n" if failed else "")
+                               + f"\n*Total approved recipes: {approved_count}*"
+                    }
+                }
+            ]
+
+            if failed:
+                result_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"💡 *Tip:* For meals I couldn't find, try sharing a specific recipe URL in the channel."
+                    }
+                })
+
+            if approved_count >= 7:
+                result_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "🎉 You have enough recipes! Run `/menu-plan new` to create your first meal plan."
+                    }
+                })
+            else:
+                result_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"You need at least 7 approved recipes for meal planning. "
+                               f"Add {7 - approved_count} more with `/menu-add-favorites` or share recipe links."
+                    }
+                })
+
+            client.chat_postMessage(
+                channel=channel_id,
+                text=f"Found {len(found)} recipes!",
+                blocks=result_blocks
+            )
 
     def _open_setup_modal(self, client: WebClient, trigger_id: str, user_id: str, is_first: bool):
         """Open the family setup modal."""

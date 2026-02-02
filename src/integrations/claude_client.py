@@ -343,6 +343,70 @@ Keep suggestions practical and family-friendly. Be concise."""
 
         return response.content[0].text.strip()
 
+    def suggest_recipe_urls(self, meal_name: str) -> list[str]:
+        """
+        Suggest real recipe URLs from well-known cooking sites for a meal name.
+        Returns a list of URLs to try extracting recipes from.
+        """
+        prompt = f"""For the meal "{meal_name}", suggest 3 specific recipe URLs from well-known cooking websites.
+
+Choose from reliable sources like:
+- allrecipes.com
+- foodnetwork.com
+- bonappetit.com
+- seriouseats.com
+- budgetbytes.com
+- simplyrecipes.com
+- cooking.nytimes.com
+- delish.com
+- tasty.co
+- thepioneerwoman.com
+
+Return ONLY a JSON array of 3 URLs (no markdown, just JSON):
+["https://...", "https://...", "https://..."]
+
+Choose recipes that are:
+- Family-friendly and approachable
+- From the most reliable/popular versions of this dish
+- Actually exist on these sites (use real URL patterns you know)
+
+If you're not confident about exact URLs, use the site's search pattern, like:
+- https://www.allrecipes.com/search?q=chicken+parmesan
+- https://www.foodnetwork.com/search/chicken-parmesan-"""
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        try:
+            result_text = response.content[0].text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("```")[1]
+                if result_text.startswith("json"):
+                    result_text = result_text[4:]
+            urls = json.loads(result_text)
+            if isinstance(urls, list):
+                return urls[:3]
+            return []
+        except (json.JSONDecodeError, IndexError):
+            return []
+
+    def find_recipe_for_meal(self, meal_name: str) -> Optional[Recipe]:
+        """
+        Find a real recipe for a meal name by searching known cooking sites.
+        Tries multiple URLs until one works.
+        """
+        urls = self.suggest_recipe_urls(meal_name)
+
+        for url in urls:
+            recipe = self.extract_recipe_from_url(url)
+            if recipe:
+                return recipe
+
+        return None
+
     def _json_to_recipe(self, data: dict, source: str, source_url: Optional[str] = None,
                         source_details: Optional[str] = None) -> Recipe:
         """Convert JSON data to a Recipe object."""
