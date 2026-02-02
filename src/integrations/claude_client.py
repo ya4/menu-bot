@@ -343,6 +343,68 @@ Keep suggestions practical and family-friendly. Be concise."""
 
         return response.content[0].text.strip()
 
+    def generate_recipe_from_name(self, meal_name: str) -> Optional[Recipe]:
+        """
+        Generate a complete recipe from just a meal name.
+        Used to bootstrap recipes from family favorites.
+        """
+        prompt = f"""Create a complete, family-friendly recipe for: {meal_name}
+
+Return a JSON object with exactly this structure (no markdown, just JSON):
+{{
+    "name": "{meal_name}",
+    "servings": 4,
+    "prep_time_min": 15,
+    "cook_time_min": 30,
+    "ingredients": [
+        {{"name": "ingredient name", "quantity": 1.0, "unit": "cup", "category": "produce"}},
+        ...
+    ],
+    "instructions": [
+        "Step 1...",
+        "Step 2...",
+        ...
+    ],
+    "tags": ["tag1", "tag2"],
+    "seasonal_ingredients": ["tomatoes", "corn"]
+}}
+
+Guidelines:
+- Create a classic, approachable version of this dish that most families would enjoy
+- Keep it practical - use common ingredients available at regular grocery stores
+- Aim for a reasonable cooking time (under 1 hour total if possible)
+- Include ALL ingredients, even basics like salt, pepper, and oil
+- For ingredients, use standard units (cup, tbsp, tsp, lb, oz, each, clove, etc.)
+- Category should be one of: produce, fresh_herbs, meat, seafood, dairy, cheese, pantry, spices, bread, specialty
+
+For tags, include relevant ones like:
+- "quick" (under 30 min total), "easy", "kid-friendly", "healthy"
+- Cuisine type: "italian", "mexican", "asian", "american", etc.
+- Cooking method: "grilled", "baked", "slow-cooker", "stovetop", etc.
+
+For seasonal_ingredients, list any produce items that are seasonally dependent."""
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        try:
+            result_text = response.content[0].text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("```")[1]
+                if result_text.startswith("json"):
+                    result_text = result_text[4:]
+            result = json.loads(result_text)
+
+            if "error" in result:
+                return None
+
+            return self._json_to_recipe(result, source="generated", source_details=f"Generated from favorite: {meal_name}")
+        except (json.JSONDecodeError, IndexError, KeyError):
+            return None
+
     def _json_to_recipe(self, data: dict, source: str, source_url: Optional[str] = None,
                         source_details: Optional[str] = None) -> Recipe:
         """Convert JSON data to a Recipe object."""

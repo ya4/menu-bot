@@ -235,6 +235,8 @@ For each command, set the Request URL to: `https://YOUR_CLOUD_RUN_URL/slack/even
 | `/menu-add-parent` | Add a parent |
 | `/menu-add-kid` | Add a kid |
 | `/menu-add-favorites` | Add favorite meals |
+| `/menu-generate-recipes` | Generate recipes from favorites |
+| `/menu-debug` | Show bot status (parents only) |
 
 #### Interactivity & Shortcuts
 
@@ -310,7 +312,8 @@ gcloud scheduler jobs create http daily-feedback \
 1. Invite the bot to your meal planning channel: `/invite @Menu Bot`
 2. Run `/menu-setup` to configure your family
 3. Add some favorite meals with `/menu-add-favorites`
-4. Start sharing recipe links!
+4. Run `/menu-generate-recipes` to create recipes from your favorites
+5. Once you have 7+ recipes, run `/menu-plan new` to create your first meal plan!
 
 ## Usage
 
@@ -329,6 +332,14 @@ https://cooking.nytimes.com/recipes/1234-chicken-parmesan
 
 **Share a photo:**
 Upload a photo of a cookbook page and mention the bot or add "recipe" in the caption.
+
+**Generate from favorites:**
+```
+/menu-add-favorites      # Add a list of meals your family loves
+/menu-generate-recipes   # Use AI to create complete recipes for each
+```
+
+This is the fastest way to get started - just list meals like "Tacos", "Spaghetti", "Grilled Cheese" and the bot will generate full recipes with ingredients and instructions.
 
 ### Meal Planning
 

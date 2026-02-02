@@ -36,7 +36,7 @@ claude = ClaudeClient()
 google_tasks = GoogleTasksClient()
 
 # Register handlers
-bootstrap_handlers = BootstrapHandlers(slack_app, db)
+bootstrap_handlers = BootstrapHandlers(slack_app, db, claude)
 recipe_handlers = RecipeHandlers(slack_app, db, claude)
 rating_handlers = RatingHandlers(slack_app, db)
 planning_handlers = PlanningHandlers(slack_app, db, claude)
@@ -65,6 +65,8 @@ def handle_help(ack, respond):
                         "`/menu-setup` - Initial family setup\n"
                         "`/menu-add-parent @user` - Add a parent\n"
                         "`/menu-add-kid @user or name` - Add a kid\n"
+                        "`/menu-add-favorites` - Add favorite meals\n"
+                        "`/menu-generate-recipes` - Generate recipes from favorites\n"
                         "`/menu-link-tasks` - Connect Google Tasks\n"
                     ),
                 },
@@ -119,6 +121,73 @@ def handle_help(ack, respond):
             },
         ],
     })
+
+
+# Debug command
+@slack_app.command("/menu-debug")
+def handle_debug(ack, body, respond):
+    """Show debug information about the bot's state."""
+    ack()
+
+    user_id = body["user_id"]
+    member = db.get_family_member(user_id)
+
+    # Only parents can see debug info
+    if not member or not member.is_parent:
+        respond("Only parents can view debug information.")
+        return
+
+    # Gather debug info
+    prefs = db.get_preferences()
+    all_recipes = db.get_all_recipes()
+    approved_recipes = [r for r in all_recipes if r.approved]
+    members = db.get_all_family_members()
+    current_plan = db.get_current_meal_plan()
+
+    debug_text = f"""*Bot Debug Information*
+
+*Setup Status*
+- Bootstrap complete: {prefs.bootstrap_complete}
+- Planning channel: {'Set' if prefs.planning_channel_id else 'Not set'}
+
+*Family Members ({len(members)})*
+"""
+    for m in members:
+        role = "Parent" if m.is_parent else "Kid" if m.user_type == "kid" else "Adult"
+        debug_text += f"- {m.name} ({role})\n"
+
+    debug_text += f"""
+*Recipes*
+- Total recipes: {len(all_recipes)}
+- Approved recipes: {len(approved_recipes)}
+- Ready for meal planning: {'Yes' if len(approved_recipes) >= 7 else f'No (need {7 - len(approved_recipes)} more)'}
+
+*Favorite Meals ({len(prefs.favorite_meals)})*
+"""
+    if prefs.favorite_meals:
+        for fav in prefs.favorite_meals[:5]:
+            debug_text += f"- {fav}\n"
+        if len(prefs.favorite_meals) > 5:
+            debug_text += f"_...and {len(prefs.favorite_meals) - 5} more_\n"
+    else:
+        debug_text += "_No favorites saved_\n"
+
+    debug_text += f"""
+*Current Meal Plan*
+- Active plan: {'Yes' if current_plan else 'No'}
+"""
+    if current_plan:
+        debug_text += f"- Week of: {current_plan.week_start}\n"
+        debug_text += f"- Status: {current_plan.status}\n"
+
+    debug_text += """
+*Troubleshooting Tips*
+- If favorites exist but no recipes: Run `/menu-generate-recipes`
+- If 7+ approved recipes but plan fails: Check Cloud Run logs
+- If URLs don't work: Bot may need to be re-invited to channel
+"""
+
+    respond(debug_text)
 
 
 # App home
