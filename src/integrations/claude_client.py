@@ -25,22 +25,272 @@ class ClaudeClient:
     def extract_recipe_from_url(self, url: str) -> Optional[Recipe]:
         """
         Extract structured recipe data from a URL.
-        Fetches the page content and uses Claude to parse it.
+        First tries to find JSON-LD structured data, then falls back to Claude parsing.
         """
+        import re
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Fetch the page content
         try:
             response = httpx.get(url, follow_redirects=True, timeout=30.0)
             response.raise_for_status()
-            html_content = response.text[:50000]  # Limit content size
+            html_content = response.text
         except Exception as e:
+            logger.error(f"Failed to fetch URL {url}: {e}")
             return None
 
+        # First, try to extract JSON-LD structured data (most recipe sites have this)
+        recipe_data = self._extract_jsonld_recipe(html_content)
+        if recipe_data:
+            logger.info(f"Found JSON-LD recipe data for {url}")
+            return self._jsonld_to_recipe(recipe_data, url)
+
+        # Fall back to Claude parsing with cleaned/reduced HTML
+        cleaned_content = self._clean_html_for_parsing(html_content)
+        if len(cleaned_content) < 500:
+            logger.warning(f"Not enough content extracted from {url}")
+            return None
+
+        logger.info(f"Using Claude to parse recipe from {url} ({len(cleaned_content)} chars)")
+        return self._parse_recipe_with_claude(cleaned_content, url)
+
+    def _extract_jsonld_recipe(self, html: str) -> Optional[dict]:
+        """Extract recipe data from JSON-LD structured data."""
+        import re
+
+        # Find all JSON-LD script blocks
+        pattern = r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>'
+        matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
+
+        for match in matches:
+            try:
+                data = json.loads(match.strip())
+
+                # Handle @graph arrays
+                if isinstance(data, dict) and "@graph" in data:
+                    data = data["@graph"]
+
+                # Handle arrays
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and item.get("@type") in ["Recipe", "recipe"]:
+                            return item
+                elif isinstance(data, dict):
+                    if data.get("@type") in ["Recipe", "recipe"]:
+                        return data
+                    # Some sites nest recipe in a list type
+                    if isinstance(data.get("@type"), list) and "Recipe" in data.get("@type"):
+                        return data
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _jsonld_to_recipe(self, data: dict, source_url: str) -> Recipe:
+        """Convert JSON-LD recipe data to our Recipe format."""
+        # Parse ingredients
+        ingredients = []
+        raw_ingredients = data.get("recipeIngredient", [])
+        for ing_text in raw_ingredients:
+            # Parse "1 cup flour" style strings
+            ingredient = self._parse_ingredient_string(ing_text)
+            ingredients.append(ingredient)
+
+        # Parse instructions
+        instructions = []
+        raw_instructions = data.get("recipeInstructions", [])
+        for inst in raw_instructions:
+            if isinstance(inst, str):
+                instructions.append(inst)
+            elif isinstance(inst, dict):
+                instructions.append(inst.get("text", ""))
+
+        # Parse times
+        prep_time = self._parse_duration(data.get("prepTime"))
+        cook_time = self._parse_duration(data.get("cookTime"))
+
+        # Parse servings
+        servings = 4
+        yield_val = data.get("recipeYield")
+        if yield_val:
+            if isinstance(yield_val, list):
+                yield_val = yield_val[0]
+            if isinstance(yield_val, str):
+                # Extract number from "4 servings" or just "4"
+                import re
+                match = re.search(r'\d+', str(yield_val))
+                if match:
+                    servings = int(match.group())
+            elif isinstance(yield_val, int):
+                servings = yield_val
+
+        # Build tags from category and cuisine
+        tags = []
+        if data.get("recipeCategory"):
+            cat = data.get("recipeCategory")
+            if isinstance(cat, list):
+                tags.extend(cat)
+            else:
+                tags.append(cat)
+        if data.get("recipeCuisine"):
+            cuisine = data.get("recipeCuisine")
+            if isinstance(cuisine, list):
+                tags.extend(cuisine)
+            else:
+                tags.append(cuisine)
+
+        return Recipe(
+            name=data.get("name", "Unknown Recipe"),
+            source="url",
+            source_url=source_url,
+            ingredients=ingredients,
+            instructions=instructions,
+            servings=servings,
+            prep_time_min=prep_time,
+            cook_time_min=cook_time,
+            tags=[t.lower() for t in tags if t],
+            seasonal_ingredients=[],
+        )
+
+    def _parse_ingredient_string(self, text: str) -> Ingredient:
+        """Parse an ingredient string like '1 cup all-purpose flour'."""
+        import re
+
+        text = text.strip()
+
+        # Try to extract quantity, unit, and name
+        # Pattern: optional quantity (number or fraction), optional unit, then ingredient name
+        pattern = r'^([\d./\s]+)?\s*(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|lb|lbs|pound|pounds|g|kg|ml|l|clove|cloves|each|piece|pieces|can|cans|package|packages)?\s*(.+)$'
+        match = re.match(pattern, text, re.IGNORECASE)
+
+        if match:
+            qty_str, unit, name = match.groups()
+            quantity = 0
+            if qty_str:
+                qty_str = qty_str.strip()
+                # Handle fractions like "1/2" or "1 1/2"
+                try:
+                    if '/' in qty_str:
+                        parts = qty_str.split()
+                        total = 0
+                        for part in parts:
+                            if '/' in part:
+                                num, denom = part.split('/')
+                                total += float(num) / float(denom)
+                            else:
+                                total += float(part)
+                        quantity = total
+                    else:
+                        quantity = float(qty_str)
+                except ValueError:
+                    quantity = 0
+
+            return Ingredient(
+                name=name.strip() if name else text,
+                quantity=quantity,
+                unit=(unit or "").lower(),
+                category=self._guess_ingredient_category(name or text),
+            )
+
+        return Ingredient(name=text, quantity=0, unit="", category="pantry")
+
+    def _guess_ingredient_category(self, name: str) -> str:
+        """Guess the category of an ingredient based on its name."""
+        name_lower = name.lower()
+
+        produce = ["lettuce", "tomato", "onion", "garlic", "pepper", "carrot", "celery", "potato", "broccoli", "spinach", "kale", "cabbage", "mushroom", "zucchini", "squash", "corn", "bean", "pea", "cucumber", "avocado", "lemon", "lime", "orange", "apple", "banana", "berry", "ginger", "scallion", "shallot", "leek"]
+        meat = ["chicken", "beef", "pork", "lamb", "turkey", "bacon", "sausage", "ham", "ground", "steak", "roast", "thigh", "breast", "wing", "rib"]
+        seafood = ["fish", "salmon", "tuna", "shrimp", "prawn", "crab", "lobster", "scallop", "mussel", "clam", "oyster", "cod", "tilapia"]
+        dairy = ["milk", "cream", "butter", "yogurt", "sour cream", "half and half", "buttermilk"]
+        cheese = ["cheese", "parmesan", "cheddar", "mozzarella", "feta", "goat cheese", "cream cheese", "ricotta"]
+        herbs = ["basil", "cilantro", "parsley", "thyme", "rosemary", "oregano", "dill", "mint", "chive", "sage", "bay leaf", "tarragon"]
+        spices = ["salt", "pepper", "cumin", "paprika", "cinnamon", "nutmeg", "curry", "chili", "cayenne", "turmeric", "coriander", "cardamom"]
+        bread = ["bread", "bun", "roll", "tortilla", "pita", "naan", "baguette", "croissant"]
+
+        for item in produce:
+            if item in name_lower:
+                return "produce"
+        for item in meat:
+            if item in name_lower:
+                return "meat"
+        for item in seafood:
+            if item in name_lower:
+                return "seafood"
+        for item in dairy:
+            if item in name_lower:
+                return "dairy"
+        for item in cheese:
+            if item in name_lower:
+                return "cheese"
+        for item in herbs:
+            if item in name_lower:
+                return "fresh_herbs"
+        for item in spices:
+            if item in name_lower:
+                return "spices"
+        for item in bread:
+            if item in name_lower:
+                return "bread"
+
+        return "pantry"
+
+    def _parse_duration(self, duration: Optional[str]) -> Optional[int]:
+        """Parse ISO 8601 duration (PT30M) to minutes."""
+        if not duration:
+            return None
+
+        import re
+        # Match patterns like PT30M, PT1H30M, PT1H, etc.
+        hours = 0
+        minutes = 0
+
+        h_match = re.search(r'(\d+)H', duration, re.IGNORECASE)
+        m_match = re.search(r'(\d+)M', duration, re.IGNORECASE)
+
+        if h_match:
+            hours = int(h_match.group(1))
+        if m_match:
+            minutes = int(m_match.group(1))
+
+        total = hours * 60 + minutes
+        return total if total > 0 else None
+
+    def _clean_html_for_parsing(self, html: str) -> str:
+        """Clean HTML to reduce size for Claude parsing."""
+        import re
+
+        # Remove script and style tags
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove comments
+        html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+
+        # Remove nav, header, footer, aside elements
+        html = re.sub(r'<nav[^>]*>.*?</nav>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<header[^>]*>.*?</header>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<footer[^>]*>.*?</footer>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<aside[^>]*>.*?</aside>', '', html, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove all HTML attributes except class and id (helps with size)
+        html = re.sub(r'\s+(style|onclick|onload|data-[a-z-]+)="[^"]*"', '', html, flags=re.IGNORECASE)
+
+        # Remove excessive whitespace
+        html = re.sub(r'\s+', ' ', html)
+
+        # Limit size
+        return html[:15000]
+
+    def _parse_recipe_with_claude(self, content: str, url: str) -> Optional[Recipe]:
+        """Use Claude to parse recipe from cleaned HTML content."""
         prompt = f"""Extract the recipe from this webpage content and return it as structured JSON.
 
 URL: {url}
 
 Page content:
-{html_content}
+{content}
 
 Return a JSON object with exactly this structure (no markdown, just JSON):
 {{
