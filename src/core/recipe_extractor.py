@@ -1,14 +1,18 @@
 """
 Recipe extraction orchestrator.
-Coordinates extraction from various sources using Claude AI.
+Uses direct scraping for URLs (JSON-LD), Claude AI only for images/text.
 """
 
 import re
 import httpx
+import logging
 from typing import Optional
 
 from src.integrations.claude_client import ClaudeClient
 from src.integrations.firestore_client import Recipe, FirestoreClient
+from src.integrations.recipe_scraper import RecipeScraper
+
+logger = logging.getLogger(__name__)
 
 
 class RecipeExtractor:
@@ -22,6 +26,7 @@ class RecipeExtractor:
         """Initialize the recipe extractor."""
         self.claude = claude_client or ClaudeClient()
         self.db = firestore_client or FirestoreClient()
+        self.scraper = RecipeScraper()
 
     def extract_from_message(
         self,
@@ -43,14 +48,16 @@ class RecipeExtractor:
         """
         recipe = None
 
-        # Check for URLs in the message
+        # Check for URLs in the message - use scraper (no AI needed)
         urls = self._extract_urls(text)
         if urls:
-            # Try the first URL
-            recipe = self.claude.extract_recipe_from_url(urls[0])
+            # Try the first URL using scraper (JSON-LD extraction)
+            logger.info(f"Extracting recipe from URL: {urls[0]}")
+            recipe = self.scraper.extract_from_url(urls[0])
             if recipe:
                 recipe.source = "url"
                 recipe.source_url = urls[0]
+                logger.info(f"Successfully extracted: {recipe.name}")
 
         # Check for image attachments (cookbook photos)
         if not recipe and files:
@@ -87,7 +94,7 @@ class RecipeExtractor:
 
     def extract_from_url(self, url: str, user_id: str = "") -> Optional[Recipe]:
         """
-        Extract a recipe from a URL.
+        Extract a recipe from a URL using JSON-LD scraping (no AI).
 
         Args:
             url: The recipe URL
@@ -96,10 +103,14 @@ class RecipeExtractor:
         Returns:
             Extracted Recipe or None
         """
-        recipe = self.claude.extract_recipe_from_url(url)
+        logger.info(f"Extracting recipe from URL: {url}")
+        recipe = self.scraper.extract_from_url(url)
         if recipe:
             recipe.created_by = user_id
             recipe = self._enrich_recipe(recipe)
+            logger.info(f"Successfully extracted and enriched: {recipe.name}")
+        else:
+            logger.warning(f"Failed to extract recipe from: {url}")
         return recipe
 
     def extract_from_text(self, text: str, user_id: str = "") -> Optional[Recipe]:
