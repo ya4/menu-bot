@@ -13,6 +13,8 @@ from slack_bolt.adapter.flask import SlackRequestHandler
 from src.integrations.firestore_client import FirestoreClient
 from src.integrations.claude_client import ClaudeClient
 from src.integrations.google_tasks import GoogleTasksClient
+from src.integrations.sheets_client import SheetsClient
+from src.integrations.metrics_client import MetricsClient
 
 from src.bot.handlers.bootstrap import BootstrapHandlers
 from src.bot.handlers.recipes import RecipeHandlers
@@ -31,14 +33,19 @@ slack_app = App(
 )
 
 # Initialize clients
+# Legacy Firestore client (for migration period)
 db = FirestoreClient()
+
+# New hybrid architecture clients
+sheets = SheetsClient() if os.environ.get("GOOGLE_SHEET_ID") else None
+metrics = MetricsClient()
 claude = ClaudeClient()
 google_tasks = GoogleTasksClient()
 
-# Register handlers
-bootstrap_handlers = BootstrapHandlers(slack_app, db, claude)
+# Register handlers (still using legacy db for now)
+bootstrap_handlers = BootstrapHandlers(slack_app, db, claude, sheets)
 recipe_handlers = RecipeHandlers(slack_app, db, claude)
-rating_handlers = RatingHandlers(slack_app, db)
+rating_handlers = RatingHandlers(slack_app, db, metrics)
 planning_handlers = PlanningHandlers(slack_app, db, claude)
 grocery_handlers = GroceryHandlers(slack_app, db, google_tasks)
 
@@ -67,6 +74,7 @@ def handle_help(ack, respond):
                         "`/menu-add-kid @user or name` - Add a kid\n"
                         "`/menu-add-favorites` - Add favorite meals\n"
                         "`/menu-find-recipes` - Find recipes for favorites\n"
+                        "`/menu-init-sheet` - Initialize Google Sheet structure\n"
                         "`/menu-link-tasks` - Connect Google Tasks\n"
                     ),
                 },

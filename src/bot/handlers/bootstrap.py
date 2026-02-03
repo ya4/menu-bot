@@ -5,12 +5,15 @@ Walks the family through setting up members and initial meal preferences.
 
 import re
 import logging
+from typing import Optional
+from datetime import datetime
 from slack_bolt import App
 from slack_sdk import WebClient
 
 from src.integrations.firestore_client import FirestoreClient, FamilyMember, Preferences
 from src.integrations.claude_client import ClaudeClient
 from src.integrations.recipe_scraper import RecipeScraper
+from src.integrations.sheets_client import SheetsClient, SheetRecipe
 from src.bot.slack_utils import format_bootstrap_welcome
 
 logger = logging.getLogger(__name__)
@@ -19,12 +22,14 @@ logger = logging.getLogger(__name__)
 class BootstrapHandlers:
     """Handlers for the bootstrap/setup flow."""
 
-    def __init__(self, app: App, db: FirestoreClient, claude: ClaudeClient = None):
+    def __init__(self, app: App, db: FirestoreClient, claude: ClaudeClient = None,
+                 sheets: Optional[SheetsClient] = None):
         """Initialize bootstrap handlers."""
         self.app = app
         self.db = db
         self.claude = claude or ClaudeClient()
         self.scraper = RecipeScraper()
+        self.sheets = sheets  # Optional - for hybrid architecture
         self._register_handlers()
 
     def _register_handlers(self):
@@ -346,8 +351,32 @@ class BootstrapHandlers:
                     if recipes:
                         # Take the first recipe found - save as pending approval
                         recipe = recipes[0]
-                        recipe.approved = False  # Require parent approval
-                        self.db.save_recipe(recipe)
+
+                        # Save to Sheets if available, otherwise Firestore
+                        if self.sheets:
+                            sheet_recipe = SheetRecipe(
+                                name=recipe.name,
+                                source_url=recipe.source_url or "",
+                                approved=False,
+                                prep_time_min=recipe.prep_time_min or 0,
+                                cook_time_min=recipe.cook_time_min or 0,
+                                servings=recipe.servings or 4,
+                                tags=", ".join(recipe.tags) if recipe.tags else "",
+                                ingredients="\n".join(
+                                    f"{i.quantity} {i.unit} {i.name}".strip()
+                                    for i in recipe.ingredients
+                                ),
+                                instructions="\n".join(
+                                    f"{n+1}. {step}" for n, step in enumerate(recipe.instructions)
+                                ),
+                                created_date=datetime.now().strftime("%Y-%m-%d"),
+                            )
+                            self.sheets.add_recipe(sheet_recipe)
+                        else:
+                            # Fall back to Firestore
+                            recipe.approved = False
+                            self.db.save_recipe(recipe)
+
                         source_info = f" (from {recipe.source_url})" if recipe.source_url else ""
                         found.append(f"{recipe.name}{source_info}")
                         logger.info(f"Successfully found recipe: {recipe.name}")
@@ -358,9 +387,17 @@ class BootstrapHandlers:
                     failed.append(meal_name)
                     logger.error(f"Error finding recipe for {meal_name}: {e}")
 
-            # Report results
-            total_recipes = len(self.db.get_all_recipes())
-            approved_count = len([r for r in self.db.get_all_recipes() if r.approved])
+            # Report results - get counts from appropriate source
+            if self.sheets:
+                all_recipes = self.sheets.get_all_recipes()
+                total_recipes = len(all_recipes)
+                approved_count = len([r for r in all_recipes if r.approved])
+                sheet_url = self.sheets.get_spreadsheet_url()
+            else:
+                total_recipes = len(self.db.get_all_recipes())
+                approved_count = len([r for r in self.db.get_all_recipes() if r.approved])
+                sheet_url = None
+
             pending_count = total_recipes - approved_count
 
             result_blocks = [
@@ -378,13 +415,22 @@ class BootstrapHandlers:
             ]
 
             if len(found) > 0:
-                result_blocks.append({
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "📋 *Next step:* Run `/menu-recipes` to review and approve the recipes."
-                    }
-                })
+                if sheet_url:
+                    result_blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"📋 *Next step:* <{sheet_url}|Open the Recipe Sheet> to review and approve recipes."
+                        }
+                    })
+                else:
+                    result_blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "📋 *Next step:* Run `/menu-recipes` to review and approve the recipes."
+                        }
+                    })
 
             if failed:
                 result_blocks.append({
@@ -418,6 +464,74 @@ class BootstrapHandlers:
                 text=f"Found {len(found)} recipes!",
                 blocks=result_blocks
             )
+
+        @self.app.command("/menu-init-sheet")
+        def handle_init_sheet(ack, body, client, respond):
+            """Initialize the Google Sheet structure for recipe/meal plan management."""
+            ack()
+
+            user_id = body["user_id"]
+
+            # Only parents can initialize the sheet
+            if not self.db.is_parent(user_id):
+                respond("Only parents can initialize the recipe sheet.")
+                return
+
+            if not self.sheets:
+                respond(
+                    "Google Sheets integration is not configured. "
+                    "Set the `GOOGLE_SHEET_ID` environment variable to enable this feature."
+                )
+                return
+
+            respond("Initializing the recipe sheet structure... This may take a moment.")
+
+            try:
+                success = self.sheets.initialize_spreadsheet()
+                if success:
+                    sheet_url = self.sheets.get_spreadsheet_url()
+                    client.chat_postMessage(
+                        channel=body["channel_id"],
+                        text="Recipe sheet initialized!",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": (
+                                        "✅ *Recipe sheet initialized successfully!*\n\n"
+                                        "I've created the following tabs:\n"
+                                        "• *Recipes* - Add and manage recipes here\n"
+                                        "• *Meal Plans* - View weekly meal plans\n"
+                                        "• *Family* - Family member info\n"
+                                        "• *Config* - Bot settings\n\n"
+                                        f"<{sheet_url}|📋 Open the Recipe Sheet>"
+                                    )
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": (
+                                        "*Next steps:*\n"
+                                        "1. Share the sheet with family members\n"
+                                        "2. Run `/menu-add-favorites` to add meal names\n"
+                                        "3. Run `/menu-find-recipes` to populate recipes\n"
+                                        "4. Mark recipes as approved in the sheet (set Approved = TRUE)"
+                                    )
+                                }
+                            }
+                        ]
+                    )
+                else:
+                    respond(
+                        "❌ Failed to initialize the sheet. Please check that the bot has "
+                        "edit access to the spreadsheet and try again."
+                    )
+            except Exception as e:
+                logger.error(f"Error initializing sheet: {e}")
+                respond(f"❌ Error initializing sheet: {str(e)}")
 
     def _open_setup_modal(self, client: WebClient, trigger_id: str, user_id: str, is_first: bool):
         """Open the family setup modal."""
