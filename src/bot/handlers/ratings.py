@@ -7,7 +7,10 @@ from datetime import datetime
 from slack_bolt import App
 from slack_sdk import WebClient
 
+from typing import Optional
+
 from src.integrations.firestore_client import FirestoreClient, Rating
+from src.integrations.metrics_client import MetricsClient
 from src.bot.slack_utils import format_rating_prompt
 from src.bot.access_control import get_user_type
 
@@ -15,10 +18,11 @@ from src.bot.access_control import get_user_type
 class RatingHandlers:
     """Handlers for meal rating interactions."""
 
-    def __init__(self, app: App, db: FirestoreClient):
+    def __init__(self, app: App, db: FirestoreClient, metrics: Optional[MetricsClient] = None):
         """Initialize rating handlers."""
         self.app = app
         self.db = db
+        self.metrics = metrics  # Optional - for hybrid architecture
         self._register_handlers()
 
     def _register_handlers(self):
