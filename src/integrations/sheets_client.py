@@ -149,11 +149,18 @@ class SheetsClient:
         Creates sheets if they don't exist, adds headers if missing.
         Returns True if successful.
         """
+        if not self.spreadsheet_id:
+            logger.error("No spreadsheet ID configured")
+            return False
+
+        logger.info(f"Initializing spreadsheet: {self.spreadsheet_id}")
+
         try:
             # Get existing sheets
             spreadsheet = self.service.spreadsheets().get(
                 spreadsheetId=self.spreadsheet_id
             ).execute()
+            logger.info(f"Retrieved spreadsheet: {spreadsheet.get('properties', {}).get('title', 'Unknown')}")
 
             existing_sheets = {
                 sheet["properties"]["title"]
@@ -187,7 +194,11 @@ class SheetsClient:
             return True
 
         except HttpError as e:
-            logger.error(f"Failed to initialize spreadsheet: {e}")
+            logger.error(f"HTTP error initializing spreadsheet: {e.status_code} - {e.reason}")
+            logger.error(f"Error details: {e.error_details}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error initializing spreadsheet: {type(e).__name__}: {e}")
             return False
 
     def _ensure_headers(self, sheet_name: str, headers: list):

@@ -485,9 +485,11 @@ class BootstrapHandlers:
                 return
 
             respond("Initializing the recipe sheet structure... This may take a moment.")
+            logger.info(f"Starting sheet initialization for user {user_id}")
 
             try:
                 success = self.sheets.initialize_spreadsheet()
+                logger.info(f"Sheet initialization result: {success}")
                 if success:
                     sheet_url = self.sheets.get_spreadsheet_url()
                     client.chat_postMessage(
