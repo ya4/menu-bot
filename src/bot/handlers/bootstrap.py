@@ -3,6 +3,7 @@ Bootstrap handlers for initial setup of the Menu Bot.
 Walks the family through setting up members and initial meal preferences.
 """
 
+import json
 import re
 import logging
 from typing import Optional
@@ -118,13 +119,16 @@ class BootstrapHandlers:
             ack()
 
             user_id = body["user_id"]
+            member = self.db.get_family_member(user_id)
 
-            # Only parents can do this
-            if not self.db.is_parent(user_id):
-                respond("Only parents can add favorite meals during setup.")
+            # Check if user is a family member
+            if not member:
+                respond("You need to be added to the family first. Ask a parent to add you with `/menu-add-kid`.")
                 return
 
-            self._open_favorites_modal(client, body["trigger_id"])
+            # Determine user role for the modal
+            is_parent = member.is_parent
+            self._open_favorites_modal(client, body["trigger_id"], user_id, is_parent)
 
         @self.app.view("bootstrap_favorites")
         def handle_favorites_submission(ack, body, client, view):
@@ -135,42 +139,90 @@ class BootstrapHandlers:
             favorites_text = values["favorites_block"]["favorites_input"]["value"]
 
             # Parse favorites (one per line)
-            favorites = [
+            new_favorites = [
                 line.strip()
                 for line in favorites_text.strip().split("\n")
                 if line.strip()
             ]
 
-            # Save favorites to preferences
-            prefs = self.db.get_preferences()
-            prefs.favorite_meals = favorites
-            self.db.save_preferences(prefs)
+            # Get metadata to determine if parent or kid
+            metadata = json.loads(view.get("private_metadata", "{}"))
+            user_id = metadata.get("user_id", body["user"]["id"])
+            is_parent = metadata.get("is_parent", True)
 
+            prefs = self.db.get_preferences()
             channel_id = prefs.planning_channel_id
 
-            if channel_id:
-                client.chat_postMessage(
-                    channel=channel_id,
-                    text=f"Got it! I've noted {len(favorites)} favorite meals.",
-                    blocks=[
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": (
-                                    f"Got it! I've saved *{len(favorites)}* favorite meals:\n"
-                                    + "\n".join([f"- {f}" for f in favorites[:10]])
-                                    + (f"\n_...and {len(favorites) - 10} more_" if len(favorites) > 10 else "")
-                                    + "\n\n*Next:* Run `/menu-find-recipes` to search for recipes matching these favorites, "
-                                    "or share specific recipe links directly in this channel!"
-                                ),
-                            },
-                        },
-                    ],
-                )
+            if is_parent:
+                # Parents replace the entire list
+                prefs.favorite_meals = new_favorites
+                self.db.save_preferences(prefs)
 
-            # Mark bootstrap as complete
-            self.db.set_bootstrap_complete()
+                if channel_id:
+                    client.chat_postMessage(
+                        channel=channel_id,
+                        text=f"Got it! I've noted {len(new_favorites)} favorite meals.",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": (
+                                        f"Got it! I've saved *{len(new_favorites)}* favorite meals:\n"
+                                        + "\n".join([f"- {f}" for f in new_favorites[:10]])
+                                        + (f"\n_...and {len(new_favorites) - 10} more_" if len(new_favorites) > 10 else "")
+                                        + "\n\n*Next:* Run `/menu-find-recipes` to search for recipes matching these favorites, "
+                                        "or share specific recipe links directly in this channel!"
+                                    ),
+                                },
+                            },
+                        ],
+                    )
+
+                # Mark bootstrap as complete
+                self.db.set_bootstrap_complete()
+            else:
+                # Kids append to the existing list (no duplicates)
+                member = self.db.get_family_member(user_id)
+                kid_name = member.name if member else "A family member"
+
+                existing = set(f.lower() for f in prefs.favorite_meals)
+                added = []
+                for fav in new_favorites:
+                    if fav.lower() not in existing:
+                        prefs.favorite_meals.append(fav)
+                        existing.add(fav.lower())
+                        added.append(fav)
+
+                if added:
+                    self.db.save_preferences(prefs)
+
+                    if channel_id:
+                        client.chat_postMessage(
+                            channel=channel_id,
+                            text=f"{kid_name} suggested some favorite meals!",
+                            blocks=[
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": (
+                                            f"*{kid_name}* suggested *{len(added)}* new favorite meal{'s' if len(added) > 1 else ''}:\n"
+                                            + "\n".join([f"- {f}" for f in added[:10]])
+                                            + (f"\n_...and {len(added) - 10} more_" if len(added) > 10 else "")
+                                            + "\n\n_Parents: Run `/menu-find-recipes` to search for recipes, then approve them in the Recipe Sheet._"
+                                        ),
+                                    },
+                                },
+                            ],
+                        )
+                else:
+                    # All suggestions were duplicates
+                    if channel_id:
+                        client.chat_postMessage(
+                            channel=channel_id,
+                            text=f"{kid_name} suggested some meals that were already on the list!",
+                        )
 
         @self.app.command("/menu-add-parent")
         def handle_add_parent(ack, body, client, respond):
@@ -645,25 +697,39 @@ class BootstrapHandlers:
             },
         )
 
-    def _open_favorites_modal(self, client: WebClient, trigger_id: str):
+    def _open_favorites_modal(self, client: WebClient, trigger_id: str,
+                               user_id: str = None, is_parent: bool = True):
         """Open the favorites input modal."""
+        # Different messaging for parents vs kids
+        if is_parent:
+            intro_text = (
+                "List some meals your family already loves! "
+                "One meal per line. These will help me learn your preferences.\n\n"
+                "Don't worry about being specific - I'll help find recipes later."
+            )
+            title = "Favorite Meals"
+        else:
+            intro_text = (
+                "What meals would you like to have for dinner? "
+                "List your suggestions below (one per line).\n\n"
+                "Your parents will see your suggestions and can add them to the meal plan!"
+            )
+            title = "Suggest Meals"
+
         client.views_open(
             trigger_id=trigger_id,
             view={
                 "type": "modal",
                 "callback_id": "bootstrap_favorites",
-                "title": {"type": "plain_text", "text": "Favorite Meals"},
-                "submit": {"type": "plain_text", "text": "Save"},
+                "private_metadata": json.dumps({"user_id": user_id, "is_parent": is_parent}),
+                "title": {"type": "plain_text", "text": title},
+                "submit": {"type": "plain_text", "text": "Save" if is_parent else "Suggest"},
                 "blocks": [
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": (
-                                "List some meals your family already loves! "
-                                "One meal per line. These will help me learn your preferences.\n\n"
-                                "Don't worry about being specific - I'll help find recipes later."
-                            ),
+                            "text": intro_text,
                         },
                     },
                     {
@@ -678,7 +744,7 @@ class BootstrapHandlers:
                                 "text": "Tacos\nSpaghetti and meatballs\nChicken stir-fry\nPizza\nGrilled cheese",
                             },
                         },
-                        "label": {"type": "plain_text", "text": "Favorite Meals"},
+                        "label": {"type": "plain_text", "text": "Favorite Meals" if is_parent else "Meal Suggestions"},
                     },
                 ],
             },
