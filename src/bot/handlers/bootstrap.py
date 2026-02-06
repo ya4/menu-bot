@@ -491,7 +491,50 @@ class BootstrapHandlers:
                 success = self.sheets.initialize_spreadsheet()
                 logger.info(f"Sheet initialization result: {success}")
                 if success:
+                    # Migrate existing recipes from Firestore to Sheet
+                    migrated_count = 0
+                    existing_recipes = self.db.get_all_recipes()
+                    logger.info(f"Found {len(existing_recipes)} existing recipes to migrate")
+
+                    for recipe in existing_recipes:
+                        # Check if recipe already exists in sheet
+                        if self.sheets.get_recipe_by_name(recipe.name):
+                            logger.info(f"Recipe already in sheet, skipping: {recipe.name}")
+                            continue
+
+                        # Convert Firestore recipe to SheetRecipe
+                        sheet_recipe = SheetRecipe(
+                            name=recipe.name,
+                            source_url=recipe.source_url or "",
+                            approved=recipe.approved,
+                            kid_score=recipe.kid_friendly_score or 0.0,
+                            health_score=recipe.health_score or 0.0,
+                            times_used=0,
+                            last_used="",
+                            prep_time_min=recipe.prep_time_minutes or 0,
+                            cook_time_min=recipe.cook_time_minutes or 0,
+                            servings=recipe.servings or 4,
+                            tags=", ".join(recipe.tags) if recipe.tags else "",
+                            ingredients="\n".join(recipe.ingredients) if recipe.ingredients else "",
+                            instructions="\n".join(recipe.instructions) if recipe.instructions else "",
+                            notes="",
+                            created_date=recipe.created_at.strftime("%Y-%m-%d") if recipe.created_at else "",
+                        )
+
+                        if self.sheets.add_recipe(sheet_recipe):
+                            migrated_count += 1
+                            logger.info(f"Migrated recipe: {recipe.name}")
+                        else:
+                            logger.warning(f"Failed to migrate recipe: {recipe.name}")
+
                     sheet_url = self.sheets.get_spreadsheet_url()
+
+                    migration_text = ""
+                    if migrated_count > 0:
+                        migration_text = f"\n\n📥 Migrated *{migrated_count}* existing recipes from the database."
+                    elif existing_recipes:
+                        migration_text = "\n\n_All existing recipes were already in the sheet._"
+
                     client.chat_postMessage(
                         channel=body["channel_id"],
                         text="Recipe sheet initialized!",
@@ -506,7 +549,8 @@ class BootstrapHandlers:
                                         "• *Recipes* - Add and manage recipes here\n"
                                         "• *Meal Plans* - View weekly meal plans\n"
                                         "• *Family* - Family member info\n"
-                                        "• *Config* - Bot settings\n\n"
+                                        "• *Config* - Bot settings"
+                                        f"{migration_text}\n\n"
                                         f"<{sheet_url}|📋 Open the Recipe Sheet>"
                                     )
                                 }
